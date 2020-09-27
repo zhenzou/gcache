@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/bluele/gcache"
 )
 
@@ -11,7 +12,7 @@ func main() {
 		Build()
 	gc.Set("key", "ok")
 
-	v, err := gc.Get("key")
+	v, err := gc.GetIFPresent("key")
 	if err != nil {
 		panic(err)
 	}

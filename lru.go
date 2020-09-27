@@ -2,6 +2,7 @@ package gcache
 
 import (
 	"container/list"
+	"context"
 	"time"
 )
 
@@ -91,10 +92,10 @@ func (c *LRUCache) SetWithExpire(key, value interface{}, expiration time.Duratio
 // Get a value from cache pool using key if it exists.
 // If it dose not exists key and has LoaderFunc,
 // generate a value using `LoaderFunc` method returns value.
-func (c *LRUCache) Get(key interface{}) (interface{}, error) {
+func (c *LRUCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
 	v, err := c.get(key, false)
 	if err == KeyNotFoundError {
-		return c.getWithLoader(key, true)
+		return c.getWithLoader(ctx, key, true)
 	}
 	return v, err
 }
@@ -105,7 +106,7 @@ func (c *LRUCache) Get(key interface{}) (interface{}, error) {
 func (c *LRUCache) GetIFPresent(key interface{}) (interface{}, error) {
 	v, err := c.get(key, false)
 	if err == KeyNotFoundError {
-		return c.getWithLoader(key, false)
+		return c.getWithLoader(context.Background(), key, false)
 	}
 	return v, err
 }
@@ -144,11 +145,11 @@ func (c *LRUCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
 	return nil, KeyNotFoundError
 }
 
-func (c *LRUCache) getWithLoader(key interface{}, isWait bool) (interface{}, error) {
+func (c *LRUCache) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
 	if c.loaderExpireFunc == nil {
 		return nil, KeyNotFoundError
 	}
-	value, _, err := c.load(key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
+	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
 		if e != nil {
 			return nil, e
 		}
@@ -183,7 +184,7 @@ func (c *LRUCache) evict(count int) {
 }
 
 // Has checks if key exists in cache
-func (c *LRUCache) Has(key interface{}) bool {
+func (c *LRUCache) Existed(key interface{}) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	now := time.Now()

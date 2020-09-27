@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/bluele/gcache"
 	"time"
+
+	"github.com/bluele/gcache"
 )
 
 func main() {
@@ -13,7 +14,7 @@ func main() {
 
 	gc.SetWithExpire("key", "ok", time.Second*3)
 
-	v, err := gc.Get("key")
+	v, err := gc.GetIFPresent("key")
 	if err != nil {
 		panic(err)
 	}
@@ -22,7 +23,7 @@ func main() {
 	fmt.Println("waiting 3s for value to expire:")
 	time.Sleep(time.Second * 3)
 
-	v, err = gc.Get("key")
+	v, err = gc.GetIFPresent("key")
 	if err != nil {
 		panic(err)
 	}

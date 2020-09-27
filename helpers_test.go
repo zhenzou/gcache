@@ -1,19 +1,22 @@
 package gcache
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 )
 
-func loader(key interface{}) (interface{}, error) {
+var defaultCtx = context.Background()
+
+func loader(ctx context.Context, key interface{}) (interface{}, error) {
 	return fmt.Sprintf("valueFor%s", key), nil
 }
 
 func testSetCache(t *testing.T, gc Cache, numbers int) {
 	for i := 0; i < numbers; i++ {
 		key := fmt.Sprintf("Key-%d", i)
-		value, err := loader(key)
+		value, err := loader(defaultCtx, key)
 		if err != nil {
 			t.Error(err)
 			return
@@ -22,14 +25,28 @@ func testSetCache(t *testing.T, gc Cache, numbers int) {
 	}
 }
 
-func testGetCache(t *testing.T, gc Cache, numbers int) {
+func testLoadingCacheGet(t *testing.T, gc LoadingCache, numbers int) {
 	for i := 0; i < numbers; i++ {
 		key := fmt.Sprintf("Key-%d", i)
-		v, err := gc.Get(key)
+		v, err := gc.Get(defaultCtx, key)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
-		expectedV, _ := loader(key)
+		expectedV, _ := loader(defaultCtx, key)
+		if v != expectedV {
+			t.Errorf("Expected value is %v, not %v", expectedV, v)
+		}
+	}
+}
+
+func testCacheGet(t *testing.T, gc Cache, numbers int) {
+	for i := 0; i < numbers; i++ {
+		key := fmt.Sprintf("Key-%d", i)
+		v, err := gc.GetIFPresent(key)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		expectedV, _ := loader(defaultCtx, key)
 		if v != expectedV {
 			t.Errorf("Expected value is %v, not %v", expectedV, v)
 		}
@@ -41,7 +58,7 @@ func testGetIFPresent(t *testing.T, evT string) {
 		New(8).
 			EvictType(evT).
 			LoaderFunc(
-				func(key interface{}) (interface{}, error) {
+				func(ctx context.Context, key interface{}) (interface{}, error) {
 					return "value", nil
 				}).
 			Build()
@@ -145,7 +162,7 @@ func buildTestCache(t *testing.T, tp string, size int) Cache {
 		Build()
 }
 
-func buildTestLoadingCache(t *testing.T, tp string, size int, loader LoaderFunc) Cache {
+func buildTestLoadingCache(t *testing.T, tp string, size int, loader LoaderFunc) LoadingCache {
 	return New(size).
 		EvictType(tp).
 		LoaderFunc(loader).
@@ -153,7 +170,7 @@ func buildTestLoadingCache(t *testing.T, tp string, size int, loader LoaderFunc)
 		Build()
 }
 
-func buildTestLoadingCacheWithExpiration(t *testing.T, tp string, size int, ep time.Duration) Cache {
+func buildTestLoadingCacheWithExpiration(t *testing.T, tp string, size int, ep time.Duration) LoadingCache {
 	return New(size).
 		EvictType(tp).
 		Expiration(ep).
