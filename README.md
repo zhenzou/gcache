@@ -1,8 +1,12 @@
 # GCache
 
-[![wercker status](https://app.wercker.com/status/1471b6c9cbc9ebbd15f8f9fe8f71ac67/m/master "wercker status")](https://app.wercker.com/project/bykey/1471b6c9cbc9ebbd15f8f9fe8f71ac67)[![GoDoc](https://godoc.org/github.com/bluele/gcache?status.png)](https://godoc.org/github.com/bluele/gcache)
-
 Cache library for golang. It supports expirable Cache, LFU, LRU and ARC.
+
+
+[![go report card](https://goreportcard.com/badge/github.com/zhenzou/gcache "go report card")](https://goreportcard.com/report/github.com/zhenzou/gcache)
+[![test status](https://github.com/zhenzou/gcache/workflows/tests/badge.svg?branch=master "test status")](https://github.com/go-gorm/gorm/actions)
+[![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+[![Go.Dev reference](https://img.shields.io/badge/go.dev-reference-blue?logo=go&logoColor=white)](https://pkg.go.dev/bluele/gcache?tab=doc)
 
 ## Features
 
@@ -28,16 +32,18 @@ $ go get github.com/bluele/gcache
 package main
 
 import (
+  "context"
+"fmt"
+
   "github.com/bluele/gcache"
-  "fmt"
 )
 
 func main() {
   gc := gcache.New(20).
     LRU().
     Build()
-  gc.Set("key", "ok")
-  value, err := gc.Get("key")
+  _ = gc.Set("key", "ok")
+  value, err := gc.Get(context.Background(),"key")
   if err != nil {
     panic(err)
   }
@@ -55,9 +61,11 @@ Get: ok
 package main
 
 import (
-  "github.com/bluele/gcache"
+  "context"
   "fmt"
   "time"
+
+  "github.com/bluele/gcache"
 )
 
 func main() {
@@ -65,13 +73,13 @@ func main() {
     LRU().
     Build()
   gc.SetWithExpire("key", "ok", time.Second*10)
-  value, _ := gc.Get("key")
+  value, _ := gc.Get(context.Background(),"key")
   fmt.Println("Get:", value)
 
   // Wait for value to expire
   time.Sleep(time.Second*10)
 
-  value, err = gc.Get("key")
+  value, err = gc.Get(context.Background(),"key")
   if err != nil {
     panic(err)
   }
@@ -92,18 +100,20 @@ panic: ErrKeyNotFound
 package main
 
 import (
-  "github.com/bluele/gcache"
+  "context"
   "fmt"
+
+  "github.com/bluele/gcache"
 )
 
 func main() {
   gc := gcache.New(20).
     LRU().
-    LoaderFunc(func(key interface{}) (interface{}, error) {
+    LoaderFunc(func(ctx context.Context,key interface{}) (interface{}, error) {
       return "ok", nil
     }).
     Build()
-  value, err := gc.Get("key")
+  value, err := gc.Get(context.Background(),"key")
   if err != nil {
     panic(err)
   }
@@ -121,6 +131,7 @@ Get: ok
 package main
 
 import (
+  "context"
   "fmt"
   "time"
 
@@ -131,7 +142,7 @@ func main() {
   var evictCounter, loaderCounter, purgeCounter int
   gc := gcache.New(20).
     LRU().
-    LoaderExpireFunc(func(key interface{}) (interface{}, *time.Duration, error) {
+    LoaderExpireFunc(func(ctx context.Context,key interface{}) (interface{}, *time.Duration, error) {
       loaderCounter++
       expire := 1 * time.Second
       return "ok", &expire, nil
@@ -145,13 +156,13 @@ func main() {
       fmt.Println("purged key:", key)
     }).
     Build()
-  value, err := gc.Get("key")
+  value, err := gc.Get(context.Background(),"key")
   if err != nil {
     panic(err)
   }
   fmt.Println("Get:", value)
   time.Sleep(1 * time.Second)
-  value, err = gc.Get("key")
+  value, err = gc.Get(context.Background(),"key")
   if err != nil {
     panic(err)
   }
@@ -221,23 +232,33 @@ purged key: key
 
   SimpleCache has no clear priority for evict cache. It depends on key-value map order.
 
-  ```go
-  func main() {
-    // size: 10
-    gc := gcache.New(10).Build()
-    gc.Set("key", "value")
-    v, err := gc.Get("key")
-    if err != nil {
-      panic(err)
-    }
+```go
+package main
+import (
+	"context"
+)
+
+func main() {
+  // size: 10
+  gc := gcache.New(10).Build()
+  gc.Set("key", "value")
+  _, err := gc.Get(context.Background(),"key")
+  if err != nil {
+    panic(err)
   }
-  ```
+}
+```
 
 ## Loading Cache
 
 If specified `LoaderFunc`, values are automatically loaded by the cache, and are stored in the cache until either evicted or manually invalidated.
 
 ```go
+package main
+import (
+  "context"
+)
+
 func main() {
   gc := gcache.New(10).
     LRU().
@@ -245,7 +266,7 @@ func main() {
       return "value", nil
     }).
     Build()
-  v, _ := gc.Get("key")
+  v, _ := gc.Get(context.Background(),"key")
   // output: "value"
   fmt.Println(v)
 }
@@ -256,6 +277,8 @@ GCache coordinates cache fills such that only one load in one process of an enti
 ## Expirable cache
 
 ```go
+package main
+
 func main() {
   // LRU cache, size: 10, expiration: after a hour
   gc := gcache.New(10).
@@ -272,6 +295,8 @@ func main() {
 Event handler for evict the entry.
 
 ```go
+package main
+
 func main() {
   gc := gcache.New(2).
     EvictedFunc(func(key, value interface{}) {
@@ -293,6 +318,8 @@ evicted key: 0
 Event handler for add the entry.
 
 ```go
+package main
+
 func main() {
   gc := gcache.New(2).
     AddedFunc(func(key, value interface{}) {
