@@ -6,7 +6,7 @@ import (
 )
 
 // Constantly balances between LRU and LFU, to improve the combined result.
-type ARC struct {
+type arcCache struct {
 	baseCache
 	items map[interface{}]*cacheItem
 
@@ -17,8 +17,8 @@ type ARC struct {
 	b2   *arcList
 }
 
-func newARC(cb *CacheBuilder) *ARC {
-	c := &ARC{}
+func newARC(cb *CacheBuilder) *arcCache {
+	c := &arcCache{}
 	buildCache(&c.baseCache, c, cb)
 
 	c.init()
@@ -26,7 +26,7 @@ func newARC(cb *CacheBuilder) *ARC {
 	return c
 }
 
-func (c *ARC) init() {
+func (c *arcCache) init() {
 	c.items = make(map[interface{}]*cacheItem)
 	c.t1 = newARCList()
 	c.t2 = newARCList()
@@ -34,7 +34,7 @@ func (c *ARC) init() {
 	c.b2 = newARCList()
 }
 
-func (c *ARC) replace(key interface{}) {
+func (c *arcCache) replace(key interface{}) {
 	if !c.isCacheFull() {
 		return
 	}
@@ -58,7 +58,7 @@ func (c *ARC) replace(key interface{}) {
 	}
 }
 
-func (c *ARC) set(key, value interface{}) (interface{}, error) {
+func (c *arcCache) set(key, value interface{}) (interface{}, error) {
 	var err error
 	if c.serializeFunc != nil {
 		value, err = c.serializeFunc(key, value)
@@ -141,7 +141,7 @@ func (c *ARC) set(key, value interface{}) (interface{}, error) {
 	return item, nil
 }
 
-func (c *ARC) get(key interface{}, onLoad bool) (interface{}, error) {
+func (c *arcCache) get(key interface{}, onLoad bool) (interface{}, error) {
 	v, err := c.getValue(key, onLoad)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (c *ARC) get(key interface{}, onLoad bool) (interface{}, error) {
 	return v, nil
 }
 
-func (c *ARC) getValue(key interface{}, onLoad bool) (interface{}, error) {
+func (c *arcCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if elt := c.t1.Lookup(key); elt != nil {
@@ -164,12 +164,12 @@ func (c *ARC) getValue(key interface{}, onLoad bool) (interface{}, error) {
 				c.stats.IncrHitCount()
 			}
 			return item.value, nil
-		} else {
-			delete(c.items, key)
-			c.b1.PushFront(key)
-			if c.evictedFunc != nil {
-				c.evictedFunc(item.key, item.value)
-			}
+		}
+
+		delete(c.items, key)
+		c.b1.PushFront(key)
+		if c.evictedFunc != nil {
+			c.evictedFunc(item.key, item.value)
 		}
 	}
 	if elt := c.t2.Lookup(key); elt != nil {
@@ -180,31 +180,31 @@ func (c *ARC) getValue(key interface{}, onLoad bool) (interface{}, error) {
 				c.stats.IncrHitCount()
 			}
 			return item.value, nil
-		} else {
-			delete(c.items, key)
-			c.t2.Remove(key, elt)
-			c.b2.PushFront(key)
-			if c.evictedFunc != nil {
-				c.evictedFunc(item.key, item.value)
-			}
+		}
+
+		delete(c.items, key)
+		c.t2.Remove(key, elt)
+		c.b2.PushFront(key)
+		if c.evictedFunc != nil {
+			c.evictedFunc(item.key, item.value)
 		}
 	}
 
 	if !onLoad {
 		c.stats.IncrMissCount()
 	}
-	return nil, KeyNotFoundError
+	return nil, ErrKeyNotFound
 }
 
 // Has checks if key exists in cache
-func (c *ARC) Existed(key interface{}) bool {
+func (c *arcCache) Existed(key interface{}) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	now := time.Now()
 	return c.has(key, &now)
 }
 
-func (c *ARC) has(key interface{}, now *time.Time) bool {
+func (c *arcCache) has(key interface{}, now *time.Time) bool {
 	item, ok := c.items[key]
 	if !ok {
 		return false
@@ -213,14 +213,14 @@ func (c *ARC) has(key interface{}, now *time.Time) bool {
 }
 
 // Remove removes the provided key from the cache.
-func (c *ARC) Remove(key interface{}) bool {
+func (c *arcCache) Remove(key interface{}) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	return c.remove(key)
 }
 
-func (c *ARC) remove(key interface{}) bool {
+func (c *arcCache) remove(key interface{}) bool {
 	if elt := c.t1.Lookup(key); elt != nil {
 		c.t1.Remove(key, elt)
 		item := c.items[key]
@@ -247,7 +247,7 @@ func (c *ARC) remove(key interface{}) bool {
 }
 
 // GetALL returns all key-value pairs in the cache.
-func (c *ARC) GetALL(checkExpired bool) map[interface{}]interface{} {
+func (c *arcCache) GetALL(checkExpired bool) map[interface{}]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	items := make(map[interface{}]interface{}, len(c.items))
@@ -261,7 +261,7 @@ func (c *ARC) GetALL(checkExpired bool) map[interface{}]interface{} {
 }
 
 // Keys returns a slice of the keys in the cache.
-func (c *ARC) Keys(checkExpired bool) []interface{} {
+func (c *arcCache) Keys(checkExpired bool) []interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	keys := make([]interface{}, 0, len(c.items))
@@ -275,7 +275,7 @@ func (c *ARC) Keys(checkExpired bool) []interface{} {
 }
 
 // Len returns the number of items in the cache.
-func (c *ARC) Len(checkExpired bool) int {
+func (c *arcCache) Len(checkExpired bool) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !checkExpired {
@@ -292,7 +292,7 @@ func (c *ARC) Len(checkExpired bool) int {
 }
 
 // Purge is used to completely clear the cache
-func (c *ARC) Purge() {
+func (c *arcCache) Purge() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -305,13 +305,13 @@ func (c *ARC) Purge() {
 	c.init()
 }
 
-func (c *ARC) setPart(p int) {
+func (c *arcCache) setPart(p int) {
 	if c.isCacheFull() {
 		c.part = p
 	}
 }
 
-func (c *ARC) isCacheFull() bool {
+func (c *arcCache) isCacheFull() bool {
 	return (c.t1.Len() + c.t2.Len()) == c.size
 }
 

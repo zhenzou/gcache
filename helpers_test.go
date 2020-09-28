@@ -54,23 +54,22 @@ func testCacheGet(t *testing.T, gc Cache, numbers int) {
 }
 
 func testGetIFPresent(t *testing.T, evT string) {
-	cache :=
-		New(8).
-			EvictType(evT).
-			LoaderFunc(
-				func(ctx context.Context, key interface{}) (interface{}, error) {
-					return "value", nil
-				}).
-			Build()
+	cache := New(8).
+		EvictType(evT).
+		LoaderFunc(
+			func(ctx context.Context, key interface{}) (interface{}, error) {
+				return "value", nil
+			}).
+		Build()
 
-	v, err := cache.GetIFPresent("key")
-	if err != KeyNotFoundError {
+	_, err := cache.GetIFPresent("key")
+	if err != ErrKeyNotFound {
 		t.Errorf("err should not be %v", err)
 	}
 
 	time.Sleep(2 * time.Millisecond)
 
-	v, err = cache.GetIFPresent("key")
+	v, err := cache.GetIFPresent("key")
 	if err != nil {
 		t.Errorf("err should not be %v", err)
 	}

@@ -15,17 +15,37 @@ const (
 	TypeArc    = "arc"
 )
 
-var KeyNotFoundError = errors.New("key not found")
+// ErrKeyNotFound return error if key not found or expired
+var ErrKeyNotFound = errors.New("key not found")
 
 type Cache interface {
+	// Set a new key-value pair
 	Set(key, value interface{}) error
+
+	// SetWithExpire Set a new key-value pair with an expiration time
 	SetWithExpire(key, value interface{}, expiration time.Duration) error
+
+	// GetIFPresent gets a value from cache pool using key if it exists.
+	// If it dose not exists key, returns ErrKeyNotFound.
+	// And send a request which refresh value for specified key if cache object has LoaderFunc.
 	GetIFPresent(key interface{}) (interface{}, error)
+
+	// GetALL returns all key-value pairs in the cache.
 	GetALL(checkExpired bool) map[interface{}]interface{}
+
+	// Remove removes the provided key from the cache.
 	Remove(key interface{}) bool
+
+	// Completely clear the cache
 	Purge()
+
+	// Keys returns a slice of the keys in the cache.
 	Keys(checkExpired bool) []interface{}
+
+	// Len returns the number of items in the cache.
 	Len(checkExpired bool) int
+
+	//Existed checks if key exists in cache
 	Existed(key interface{}) bool
 
 	set(key, value interface{}) (interface{}, error)
@@ -36,7 +56,11 @@ type Cache interface {
 
 type LoadingCache interface {
 	Cache
+	// Get a value from cache pool using key if it exists. If not exists and it has LoaderFunc,
+	// it will generate the value using you have specified LoaderFunc method returns value.
 	Get(ctx context.Context, key interface{}) (interface{}, error)
+
+	//Refresh refresh a new value using by specified key.
 	Refresh(ctx context.Context, key interface{}) (interface{}, error)
 }
 
@@ -51,7 +75,7 @@ type (
 )
 
 type CacheBuilder struct {
-	clock            Clock
+	clock            clock
 	tp               string
 	size             int
 	loaderExpireFunc LoaderExpireFunc
@@ -65,13 +89,13 @@ type CacheBuilder struct {
 
 func New(size int) *CacheBuilder {
 	return &CacheBuilder{
-		clock: NewRealClock(),
+		clock: newRealClock(),
 		tp:    TypeSimple,
 		size:  size,
 	}
 }
 
-func (cb *CacheBuilder) Clock(clock Clock) *CacheBuilder {
+func (cb *CacheBuilder) Clock(clock clock) *CacheBuilder {
 	cb.clock = clock
 	return cb
 }
@@ -246,7 +270,7 @@ func buildCache(b *baseCache, c Cache, cb *CacheBuilder) {
 }
 
 type cacheItem struct {
-	clock      Clock
+	clock      clock
 	key        interface{}
 	value      interface{}
 	expiration *time.Time
@@ -267,7 +291,7 @@ func (item *cacheItem) IsExpired(now *time.Time) bool {
 type baseCache struct {
 	cache Cache
 
-	clock            Clock
+	clock            clock
 	size             int
 	loaderExpireFunc LoaderExpireFunc
 	evictedFunc      EvictedFunc
@@ -281,7 +305,6 @@ type baseCache struct {
 	*stats
 }
 
-// Set a new key-value pair
 func (c *baseCache) Set(key, value interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -305,18 +328,18 @@ func (c *baseCache) SetWithExpire(key, value interface{}, expiration time.Durati
 // Get a value from cache pool using key if it exists. If not exists and it has LoaderFunc, it will generate the value using you have specified LoaderFunc method returns value.
 func (c *baseCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
 	v, err := c.cache.get(key, false)
-	if err == KeyNotFoundError {
+	if err == ErrKeyNotFound {
 		return c.getWithLoader(ctx, key, true)
 	}
 	return v, err
 }
 
 // GetIFPresent gets a value from cache pool using key if it exists.
-// If it dose not exists key, returns KeyNotFoundError.
+// If it dose not exists key, returns ErrKeyNotFound.
 // And send a request which refresh value for specified key if cache object has LoaderFunc.
 func (c *baseCache) GetIFPresent(key interface{}) (interface{}, error) {
 	v, err := c.cache.get(key, false)
-	if err == KeyNotFoundError {
+	if err == ErrKeyNotFound {
 		return c.getWithLoader(context.Background(), key, false)
 	}
 	return v, nil
@@ -340,7 +363,7 @@ func (c *baseCache) load(ctx context.Context, key interface{}, cb func(interface
 
 func (c *baseCache) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
 	if c.loaderExpireFunc == nil {
-		return nil, KeyNotFoundError
+		return nil, ErrKeyNotFound
 	}
 	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
 		if e != nil {

@@ -45,13 +45,13 @@ func TestSimpleEvictItem(t *testing.T) {
 
 func TestSimpleUnboundedNoEviction(t *testing.T) {
 	numbers := 1000
-	size_tracker := 0
+	sizeTracker := 0
 	gcu := buildTestLoadingCache(t, TypeSimple, 0, loader)
 
 	for i := 0; i < numbers; i++ {
-		current_size := gcu.Len(true)
-		if current_size != size_tracker {
-			t.Errorf("Excepted cache size is %v not %v", current_size, size_tracker)
+		currentSize := gcu.Len(true)
+		if currentSize != sizeTracker {
+			t.Errorf("Excepted cache size is %v not %v", currentSize, sizeTracker)
 		}
 
 		_, err := gcu.Get(defaultCtx, fmt.Sprintf("Key-%d", i))
@@ -59,7 +59,7 @@ func TestSimpleUnboundedNoEviction(t *testing.T) {
 			t.Errorf("Unexpected error: %v", err)
 		}
 
-		size_tracker++
+		sizeTracker++
 	}
 }
 

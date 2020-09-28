@@ -4,14 +4,14 @@ import (
 	"time"
 )
 
-// SimpleCache has no clear priority for evict cache. It depends on key-value map order.
-type SimpleCache struct {
+// simpleCache has no clear priority for evict cache. It depends on key-value map order.
+type simpleCache struct {
 	baseCache
 	items map[interface{}]*cacheItem
 }
 
-func newSimpleCache(cb *CacheBuilder) *SimpleCache {
-	c := &SimpleCache{}
+func newSimpleCache(cb *CacheBuilder) *simpleCache {
+	c := &simpleCache{}
 	buildCache(&c.baseCache, c, cb)
 
 	c.init()
@@ -19,7 +19,7 @@ func newSimpleCache(cb *CacheBuilder) *SimpleCache {
 	return c
 }
 
-func (c *SimpleCache) init() {
+func (c *simpleCache) init() {
 	if c.size <= 0 {
 		c.items = make(map[interface{}]*cacheItem)
 	} else {
@@ -27,7 +27,7 @@ func (c *SimpleCache) init() {
 	}
 }
 
-func (c *SimpleCache) set(key, value interface{}) (interface{}, error) {
+func (c *simpleCache) set(key, value interface{}) (interface{}, error) {
 	var err error
 	if c.serializeFunc != nil {
 		value, err = c.serializeFunc(key, value)
@@ -64,7 +64,7 @@ func (c *SimpleCache) set(key, value interface{}) (interface{}, error) {
 	return item, nil
 }
 
-func (c *SimpleCache) get(key interface{}, onLoad bool) (interface{}, error) {
+func (c *simpleCache) get(key interface{}, onLoad bool) (interface{}, error) {
 	v, err := c.getValue(key, onLoad)
 	if err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (c *SimpleCache) get(key interface{}, onLoad bool) (interface{}, error) {
 	return v, nil
 }
 
-func (c *SimpleCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
+func (c *simpleCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
 	c.mu.Lock()
 	item, ok := c.items[key]
 	if ok {
@@ -93,10 +93,10 @@ func (c *SimpleCache) getValue(key interface{}, onLoad bool) (interface{}, error
 	if !onLoad {
 		c.stats.IncrMissCount()
 	}
-	return nil, KeyNotFoundError
+	return nil, ErrKeyNotFound
 }
 
-func (c *SimpleCache) evict(count int) {
+func (c *simpleCache) evict(count int) {
 	now := c.clock.Now()
 	current := 0
 	for key, item := range c.items {
@@ -111,14 +111,14 @@ func (c *SimpleCache) evict(count int) {
 }
 
 // Has checks if key exists in cache
-func (c *SimpleCache) Existed(key interface{}) bool {
+func (c *simpleCache) Existed(key interface{}) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	now := time.Now()
 	return c.has(key, &now)
 }
 
-func (c *SimpleCache) has(key interface{}, now *time.Time) bool {
+func (c *simpleCache) has(key interface{}, now *time.Time) bool {
 	item, ok := c.items[key]
 	if !ok {
 		return false
@@ -127,14 +127,14 @@ func (c *SimpleCache) has(key interface{}, now *time.Time) bool {
 }
 
 // Remove removes the provided key from the cache.
-func (c *SimpleCache) Remove(key interface{}) bool {
+func (c *simpleCache) Remove(key interface{}) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	return c.remove(key)
 }
 
-func (c *SimpleCache) remove(key interface{}) bool {
+func (c *simpleCache) remove(key interface{}) bool {
 	item, ok := c.items[key]
 	if ok {
 		delete(c.items, key)
@@ -147,7 +147,7 @@ func (c *SimpleCache) remove(key interface{}) bool {
 }
 
 // Returns a slice of the keys in the cache.
-func (c *SimpleCache) keys() []interface{} {
+func (c *simpleCache) keys() []interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	keys := make([]interface{}, len(c.items))
@@ -160,7 +160,7 @@ func (c *SimpleCache) keys() []interface{} {
 }
 
 // GetALL returns all key-value pairs in the cache.
-func (c *SimpleCache) GetALL(checkExpired bool) map[interface{}]interface{} {
+func (c *simpleCache) GetALL(checkExpired bool) map[interface{}]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	items := make(map[interface{}]interface{}, len(c.items))
@@ -174,7 +174,7 @@ func (c *SimpleCache) GetALL(checkExpired bool) map[interface{}]interface{} {
 }
 
 // Keys returns a slice of the keys in the cache.
-func (c *SimpleCache) Keys(checkExpired bool) []interface{} {
+func (c *simpleCache) Keys(checkExpired bool) []interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	keys := make([]interface{}, 0, len(c.items))
@@ -188,7 +188,7 @@ func (c *SimpleCache) Keys(checkExpired bool) []interface{} {
 }
 
 // Len returns the number of items in the cache.
-func (c *SimpleCache) Len(checkExpired bool) int {
+func (c *simpleCache) Len(checkExpired bool) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !checkExpired {
@@ -205,7 +205,7 @@ func (c *SimpleCache) Len(checkExpired bool) int {
 }
 
 // Completely clear the cache
-func (c *SimpleCache) Purge() {
+func (c *simpleCache) Purge() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

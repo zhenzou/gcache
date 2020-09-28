@@ -53,7 +53,7 @@ func (g *Group) Do(key interface{}, fn func() (interface{}, error), isWait bool)
 	if c, ok := g.m[key]; ok {
 		g.mu.Unlock()
 		if !isWait {
-			return nil, false, KeyNotFoundError
+			return nil, false, ErrKeyNotFound
 		}
 		c.wg.Wait()
 		return c.val, false, c.err
@@ -64,7 +64,7 @@ func (g *Group) Do(key interface{}, fn func() (interface{}, error), isWait bool)
 	g.mu.Unlock()
 	if !isWait {
 		go g.call(c, key, fn)
-		return nil, false, KeyNotFoundError
+		return nil, false, ErrKeyNotFound
 	}
 	v, err = g.call(c, key, fn)
 	return v, true, err

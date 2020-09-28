@@ -5,28 +5,28 @@ import (
 	"time"
 )
 
-type Clock interface {
+type clock interface {
 	Now() time.Time
 }
 
-type RealClock struct{}
+type realClock struct{}
 
-func NewRealClock() Clock {
-	return RealClock{}
+func newRealClock() clock {
+	return realClock{}
 }
 
-func (rc RealClock) Now() time.Time {
+func (rc realClock) Now() time.Time {
 	t := time.Now()
 	return t
 }
 
-type FakeClock interface {
-	Clock
+type fakeClock interface {
+	clock
 
 	Advance(d time.Duration)
 }
 
-func NewFakeClock() FakeClock {
+func newFakeClock() fakeClock {
 	return &fakeclock{
 		// Taken from github.com/jonboulle/clockwork: use a fixture that does not fulfill Time.IsZero()
 		now: time.Date(1984, time.April, 4, 0, 0, 0, 0, time.UTC),
