@@ -366,5 +366,5 @@ func (c *baseCache) getWithLoader(ctx context.Context, key interface{}, isWait b
 
 // load a new value using by specified key.
 func (c *baseCache) Refresh(ctx context.Context, key interface{}) (interface{}, error) {
-	panic("to to")
+	return c.getWithLoader(ctx, key, true)
 }

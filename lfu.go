@@ -100,6 +100,11 @@ func (c *LFUCache) Get(ctx context.Context, key interface{}) (interface{}, error
 	return v, err
 }
 
+//Refresh refresh a new value using by specified key.
+func (c *LFUCache) Refresh(ctx context.Context, key interface{}) (interface{}, error) {
+	return c.getWithLoader(ctx, key, true)
+}
+
 // GetIFPresent gets a value from cache pool using key if it exists.
 // If it dose not exists key, returns KeyNotFoundError.
 // And send a request which refresh value for specified key if cache object has LoaderFunc.
