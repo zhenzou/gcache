@@ -2,7 +2,6 @@ package gcache
 
 import (
 	"container/list"
-	"context"
 	"time"
 )
 
@@ -15,7 +14,7 @@ type LRUCache struct {
 
 func newLRUCache(cb *CacheBuilder) *LRUCache {
 	c := &LRUCache{}
-	buildCache(&c.baseCache, cb)
+	buildCache(&c.baseCache, c, cb)
 
 	c.init()
 	c.loadGroup.cache = c
@@ -37,17 +36,17 @@ func (c *LRUCache) set(key, value interface{}) (interface{}, error) {
 	}
 
 	// Check for existing item
-	var item *lruItem
+	var item *cacheItem
 	if it, ok := c.items[key]; ok {
 		c.evictList.MoveToFront(it)
-		item = it.Value.(*lruItem)
+		item = it.Value.(*cacheItem)
 		item.value = value
 	} else {
 		// Verify size not exceeded
 		if c.evictList.Len() >= c.size {
 			c.evict(1)
 		}
-		item = &lruItem{
+		item = &cacheItem{
 			clock: c.clock,
 			key:   key,
 			value: value,
@@ -75,42 +74,6 @@ func (c *LRUCache) Set(key, value interface{}) error {
 	return err
 }
 
-// Set a new key-value pair with an expiration time
-func (c *LRUCache) SetWithExpire(key, value interface{}, expiration time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	item, err := c.set(key, value)
-	if err != nil {
-		return err
-	}
-
-	t := c.clock.Now().Add(expiration)
-	item.(*lruItem).expiration = &t
-	return nil
-}
-
-// Get a value from cache pool using key if it exists.
-// If it dose not exists key and has LoaderFunc,
-// generate a value using `LoaderFunc` method returns value.
-func (c *LRUCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(ctx, key, true)
-	}
-	return v, err
-}
-
-// GetIFPresent gets a value from cache pool using key if it exists.
-// If it dose not exists key, returns KeyNotFoundError.
-// And send a request which refresh value for specified key if cache object has LoaderFunc.
-func (c *LRUCache) GetIFPresent(key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(context.Background(), key, false)
-	}
-	return v, err
-}
-
 func (c *LRUCache) get(key interface{}, onLoad bool) (interface{}, error) {
 	v, err := c.getValue(key, onLoad)
 	if err != nil {
@@ -126,7 +89,7 @@ func (c *LRUCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
 	c.mu.Lock()
 	item, ok := c.items[key]
 	if ok {
-		it := item.Value.(*lruItem)
+		it := item.Value.(*cacheItem)
 		if !it.IsExpired(nil) {
 			c.evictList.MoveToFront(item)
 			v := it.value
@@ -143,32 +106,6 @@ func (c *LRUCache) getValue(key interface{}, onLoad bool) (interface{}, error) {
 		c.stats.IncrMissCount()
 	}
 	return nil, KeyNotFoundError
-}
-
-func (c *LRUCache) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
-	if c.loaderExpireFunc == nil {
-		return nil, KeyNotFoundError
-	}
-	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
-		if e != nil {
-			return nil, e
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		item, err := c.set(key, v)
-		if err != nil {
-			return nil, err
-		}
-		if expiration != nil {
-			t := c.clock.Now().Add(*expiration)
-			item.(*lruItem).expiration = &t
-		}
-		return v, nil
-	}, isWait)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 // evict removes the oldest item from the cache.
@@ -196,7 +133,7 @@ func (c *LRUCache) has(key interface{}, now *time.Time) bool {
 	if !ok {
 		return false
 	}
-	return !item.Value.(*lruItem).IsExpired(now)
+	return !item.Value.(*cacheItem).IsExpired(now)
 }
 
 // Remove removes the provided key from the cache.
@@ -217,10 +154,10 @@ func (c *LRUCache) remove(key interface{}) bool {
 
 func (c *LRUCache) removeElement(e *list.Element) {
 	c.evictList.Remove(e)
-	entry := e.Value.(*lruItem)
+	entry := e.Value.(*cacheItem)
 	delete(c.items, entry.key)
 	if c.evictedFunc != nil {
-		entry := e.Value.(*lruItem)
+		entry := e.Value.(*cacheItem)
 		c.evictedFunc(entry.key, entry.value)
 	}
 }
@@ -245,7 +182,7 @@ func (c *LRUCache) GetALL(checkExpired bool) map[interface{}]interface{} {
 	now := time.Now()
 	for k, item := range c.items {
 		if !checkExpired || c.has(k, &now) {
-			items[k] = item.Value.(*lruItem).value
+			items[k] = item.Value.(*cacheItem).value
 		}
 	}
 	return items
@@ -289,30 +226,11 @@ func (c *LRUCache) Purge() {
 
 	if c.purgeVisitorFunc != nil {
 		for key, item := range c.items {
-			it := item.Value.(*lruItem)
+			it := item.Value.(*cacheItem)
 			v := it.value
 			c.purgeVisitorFunc(key, v)
 		}
 	}
 
 	c.init()
-}
-
-type lruItem struct {
-	clock      Clock
-	key        interface{}
-	value      interface{}
-	expiration *time.Time
-}
-
-// IsExpired returns boolean value whether this item is expired or not.
-func (it *lruItem) IsExpired(now *time.Time) bool {
-	if it.expiration == nil {
-		return false
-	}
-	if now == nil {
-		t := it.clock.Now()
-		now = &t
-	}
-	return it.expiration.Before(*now)
 }

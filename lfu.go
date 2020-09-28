@@ -15,7 +15,7 @@ type LFUCache struct {
 
 func newLFUCache(cb *CacheBuilder) *LFUCache {
 	c := &LFUCache{}
-	buildCache(&c.baseCache, cb)
+	buildCache(&c.baseCache, c, cb)
 
 	c.init()
 	c.loadGroup.cache = c
@@ -29,14 +29,6 @@ func (c *LFUCache) init() {
 		freq:  0,
 		items: make(map[*lfuItem]struct{}),
 	})
-}
-
-// Set a new key-value pair
-func (c *LFUCache) Set(key, value interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, err := c.set(key, value)
-	return err
 }
 
 // Set a new key-value pair with an expiration time
@@ -72,9 +64,11 @@ func (c *LFUCache) set(key, value interface{}) (interface{}, error) {
 			c.evict(1)
 		}
 		item = &lfuItem{
-			clock:       c.clock,
-			key:         key,
-			value:       value,
+			cacheItem: cacheItem{
+				clock: c.clock,
+				key:   key,
+				value: value,
+			},
 			freqElement: nil,
 		}
 		el := c.freqList.Front()
@@ -97,11 +91,9 @@ func (c *LFUCache) set(key, value interface{}) (interface{}, error) {
 	return item, nil
 }
 
-// Get a value from cache pool using key if it exists.
-// If it dose not exists key and has LoaderFunc,
-// generate a value using `LoaderFunc` method returns value.
+// Get a value from cache pool using key if it exists. If not exists and it has LoaderFunc, it will generate the value using you have specified LoaderFunc method returns value.
 func (c *LFUCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
+	v, err := c.cache.get(key, false)
 	if err == KeyNotFoundError {
 		return c.getWithLoader(ctx, key, true)
 	}
@@ -112,11 +104,11 @@ func (c *LFUCache) Get(ctx context.Context, key interface{}) (interface{}, error
 // If it dose not exists key, returns KeyNotFoundError.
 // And send a request which refresh value for specified key if cache object has LoaderFunc.
 func (c *LFUCache) GetIFPresent(key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
+	v, err := c.cache.get(key, false)
 	if err == KeyNotFoundError {
 		return c.getWithLoader(context.Background(), key, false)
 	}
-	return v, err
+	return v, nil
 }
 
 func (c *LFUCache) get(key interface{}, onLoad bool) (interface{}, error) {
@@ -332,21 +324,6 @@ type freqEntry struct {
 }
 
 type lfuItem struct {
-	clock       Clock
-	key         interface{}
-	value       interface{}
+	cacheItem
 	freqElement *list.Element
-	expiration  *time.Time
-}
-
-// IsExpired returns boolean value whether this item is expired or not.
-func (it *lfuItem) IsExpired(now *time.Time) bool {
-	if it.expiration == nil {
-		return false
-	}
-	if now == nil {
-		t := it.clock.Now()
-		now = &t
-	}
-	return it.expiration.Before(*now)
 }

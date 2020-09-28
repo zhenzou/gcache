@@ -1,19 +1,18 @@
 package gcache
 
 import (
-	"context"
 	"time"
 )
 
 // SimpleCache has no clear priority for evict cache. It depends on key-value map order.
 type SimpleCache struct {
 	baseCache
-	items map[interface{}]*simpleItem
+	items map[interface{}]*cacheItem
 }
 
 func newSimpleCache(cb *CacheBuilder) *SimpleCache {
 	c := &SimpleCache{}
-	buildCache(&c.baseCache, cb)
+	buildCache(&c.baseCache, c, cb)
 
 	c.init()
 	c.loadGroup.cache = c
@@ -22,32 +21,10 @@ func newSimpleCache(cb *CacheBuilder) *SimpleCache {
 
 func (c *SimpleCache) init() {
 	if c.size <= 0 {
-		c.items = make(map[interface{}]*simpleItem)
+		c.items = make(map[interface{}]*cacheItem)
 	} else {
-		c.items = make(map[interface{}]*simpleItem, c.size)
+		c.items = make(map[interface{}]*cacheItem, c.size)
 	}
-}
-
-// Set a new key-value pair
-func (c *SimpleCache) Set(key, value interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, err := c.set(key, value)
-	return err
-}
-
-// Set a new key-value pair with an expiration time
-func (c *SimpleCache) SetWithExpire(key, value interface{}, expiration time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	item, err := c.set(key, value)
-	if err != nil {
-		return err
-	}
-
-	t := c.clock.Now().Add(expiration)
-	item.(*simpleItem).expiration = &t
-	return nil
 }
 
 func (c *SimpleCache) set(key, value interface{}) (interface{}, error) {
@@ -68,7 +45,7 @@ func (c *SimpleCache) set(key, value interface{}) (interface{}, error) {
 		if (len(c.items) >= c.size) && c.size > 0 {
 			c.evict(1)
 		}
-		item = &simpleItem{
+		item = &cacheItem{
 			clock: c.clock,
 			value: value,
 		}
@@ -85,28 +62,6 @@ func (c *SimpleCache) set(key, value interface{}) (interface{}, error) {
 	}
 
 	return item, nil
-}
-
-// Get a value from cache pool using key if it exists.
-// If it dose not exists key and has LoaderFunc,
-// generate a value using `LoaderFunc` method returns value.
-func (c *SimpleCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(ctx, key, true)
-	}
-	return v, err
-}
-
-// GetIFPresent gets a value from cache pool using key if it exists.
-// If it dose not exists key, returns KeyNotFoundError.
-// And send a request which refresh value for specified key if cache object has LoaderFunc.
-func (c *SimpleCache) GetIFPresent(key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(context.Background(), key, false)
-	}
-	return v, nil
 }
 
 func (c *SimpleCache) get(key interface{}, onLoad bool) (interface{}, error) {
@@ -139,32 +94,6 @@ func (c *SimpleCache) getValue(key interface{}, onLoad bool) (interface{}, error
 		c.stats.IncrMissCount()
 	}
 	return nil, KeyNotFoundError
-}
-
-func (c *SimpleCache) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
-	if c.loaderExpireFunc == nil {
-		return nil, KeyNotFoundError
-	}
-	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
-		if e != nil {
-			return nil, e
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		item, err := c.set(key, v)
-		if err != nil {
-			return nil, err
-		}
-		if expiration != nil {
-			t := c.clock.Now().Add(*expiration)
-			item.(*simpleItem).expiration = &t
-		}
-		return v, nil
-	}, isWait)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 func (c *SimpleCache) evict(count int) {
@@ -285,24 +214,5 @@ func (c *SimpleCache) Purge() {
 			c.purgeVisitorFunc(key, item.value)
 		}
 	}
-
 	c.init()
-}
-
-type simpleItem struct {
-	clock      Clock
-	value      interface{}
-	expiration *time.Time
-}
-
-// IsExpired returns boolean value whether this item is expired or not.
-func (si *simpleItem) IsExpired(now *time.Time) bool {
-	if si.expiration == nil {
-		return false
-	}
-	if now == nil {
-		t := si.clock.Now()
-		now = &t
-	}
-	return si.expiration.Before(*now)
 }

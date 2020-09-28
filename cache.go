@@ -22,12 +22,14 @@ type Cache interface {
 	SetWithExpire(key, value interface{}, expiration time.Duration) error
 	GetIFPresent(key interface{}) (interface{}, error)
 	GetALL(checkExpired bool) map[interface{}]interface{}
-	get(key interface{}, onLoad bool) (interface{}, error)
 	Remove(key interface{}) bool
 	Purge()
 	Keys(checkExpired bool) []interface{}
 	Len(checkExpired bool) int
 	Existed(key interface{}) bool
+
+	set(key, value interface{}) (interface{}, error)
+	get(key interface{}, onLoad bool) (interface{}, error)
 
 	statsAccessor
 }
@@ -36,21 +38,6 @@ type LoadingCache interface {
 	Cache
 	Get(ctx context.Context, key interface{}) (interface{}, error)
 	Refresh(ctx context.Context, key interface{}) (interface{}, error)
-}
-
-type baseCache struct {
-	clock            Clock
-	size             int
-	loaderExpireFunc LoaderExpireFunc
-	evictedFunc      EvictedFunc
-	purgeVisitorFunc PurgeVisitorFunc
-	addedFunc        AddedFunc
-	deserializeFunc  DeserializeFunc
-	serializeFunc    SerializeFunc
-	expiration       *time.Duration
-	mu               sync.RWMutex
-	loadGroup        Group
-	*stats
 }
 
 type (
@@ -243,17 +230,96 @@ func (cb *loadingCacheBuilder) Build() LoadingCache {
 	return cb.CacheBuilder.Build().(LoadingCache)
 }
 
-func buildCache(c *baseCache, cb *CacheBuilder) {
-	c.clock = cb.clock
-	c.size = cb.size
-	c.loaderExpireFunc = cb.loaderExpireFunc
-	c.expiration = cb.expiration
-	c.addedFunc = cb.addedFunc
-	c.deserializeFunc = cb.deserializeFunc
-	c.serializeFunc = cb.serializeFunc
-	c.evictedFunc = cb.evictedFunc
-	c.purgeVisitorFunc = cb.purgeVisitorFunc
-	c.stats = &stats{}
+func buildCache(b *baseCache, c Cache, cb *CacheBuilder) {
+	b.cache = c
+
+	b.clock = cb.clock
+	b.size = cb.size
+	b.loaderExpireFunc = cb.loaderExpireFunc
+	b.expiration = cb.expiration
+	b.addedFunc = cb.addedFunc
+	b.deserializeFunc = cb.deserializeFunc
+	b.serializeFunc = cb.serializeFunc
+	b.evictedFunc = cb.evictedFunc
+	b.purgeVisitorFunc = cb.purgeVisitorFunc
+	b.stats = &stats{}
+}
+
+type cacheItem struct {
+	clock      Clock
+	key        interface{}
+	value      interface{}
+	expiration *time.Time
+}
+
+// IsExpired returns boolean value whether this item is expired or not.
+func (item *cacheItem) IsExpired(now *time.Time) bool {
+	if item.expiration == nil {
+		return false
+	}
+	if now == nil {
+		t := item.clock.Now()
+		now = &t
+	}
+	return item.expiration.Before(*now)
+}
+
+type baseCache struct {
+	cache Cache
+
+	clock            Clock
+	size             int
+	loaderExpireFunc LoaderExpireFunc
+	evictedFunc      EvictedFunc
+	purgeVisitorFunc PurgeVisitorFunc
+	addedFunc        AddedFunc
+	deserializeFunc  DeserializeFunc
+	serializeFunc    SerializeFunc
+	expiration       *time.Duration
+	mu               sync.RWMutex
+	loadGroup        Group
+	*stats
+}
+
+// Set a new key-value pair
+func (c *baseCache) Set(key, value interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.cache.set(key, value)
+	return err
+}
+
+func (c *baseCache) SetWithExpire(key, value interface{}, expiration time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item, err := c.cache.set(key, value)
+	if err != nil {
+		return err
+	}
+
+	t := c.clock.Now().Add(expiration)
+	item.(*cacheItem).expiration = &t
+	return nil
+}
+
+// Get a value from cache pool using key if it exists. If not exists and it has LoaderFunc, it will generate the value using you have specified LoaderFunc method returns value.
+func (c *baseCache) Get(ctx context.Context, key interface{}) (interface{}, error) {
+	v, err := c.cache.get(key, false)
+	if err == KeyNotFoundError {
+		return c.getWithLoader(ctx, key, true)
+	}
+	return v, err
+}
+
+// GetIFPresent gets a value from cache pool using key if it exists.
+// If it dose not exists key, returns KeyNotFoundError.
+// And send a request which refresh value for specified key if cache object has LoaderFunc.
+func (c *baseCache) GetIFPresent(key interface{}) (interface{}, error) {
+	v, err := c.cache.get(key, false)
+	if err == KeyNotFoundError {
+		return c.getWithLoader(context.Background(), key, false)
+	}
+	return v, nil
 }
 
 // load a new value using by specified key.
@@ -270,6 +336,32 @@ func (c *baseCache) load(ctx context.Context, key interface{}, cb func(interface
 		return nil, called, err
 	}
 	return v, called, nil
+}
+
+func (c *baseCache) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
+	if c.loaderExpireFunc == nil {
+		return nil, KeyNotFoundError
+	}
+	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
+		if e != nil {
+			return nil, e
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		item, err := c.cache.set(key, v)
+		if err != nil {
+			return nil, err
+		}
+		if expiration != nil {
+			t := c.clock.Now().Add(*expiration)
+			item.(*cacheItem).expiration = &t
+		}
+		return v, nil
+	}, isWait)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
 // load a new value using by specified key.

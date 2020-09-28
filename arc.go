@@ -2,14 +2,13 @@ package gcache
 
 import (
 	"container/list"
-	"context"
 	"time"
 )
 
 // Constantly balances between LRU and LFU, to improve the combined result.
 type ARC struct {
 	baseCache
-	items map[interface{}]*arcItem
+	items map[interface{}]*cacheItem
 
 	part int
 	t1   *arcList
@@ -20,7 +19,7 @@ type ARC struct {
 
 func newARC(cb *CacheBuilder) *ARC {
 	c := &ARC{}
-	buildCache(&c.baseCache, cb)
+	buildCache(&c.baseCache, c, cb)
 
 	c.init()
 	c.loadGroup.cache = c
@@ -28,7 +27,7 @@ func newARC(cb *CacheBuilder) *ARC {
 }
 
 func (c *ARC) init() {
-	c.items = make(map[interface{}]*arcItem)
+	c.items = make(map[interface{}]*cacheItem)
 	c.t1 = newARCList()
 	c.t2 = newARCList()
 	c.b1 = newARCList()
@@ -59,27 +58,6 @@ func (c *ARC) replace(key interface{}) {
 	}
 }
 
-func (c *ARC) Set(key, value interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, err := c.set(key, value)
-	return err
-}
-
-// Set a new key-value pair with an expiration time
-func (c *ARC) SetWithExpire(key, value interface{}, expiration time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	item, err := c.set(key, value)
-	if err != nil {
-		return err
-	}
-
-	t := c.clock.Now().Add(expiration)
-	item.(*arcItem).expiration = &t
-	return nil
-}
-
 func (c *ARC) set(key, value interface{}) (interface{}, error) {
 	var err error
 	if c.serializeFunc != nil {
@@ -93,7 +71,7 @@ func (c *ARC) set(key, value interface{}) (interface{}, error) {
 	if ok {
 		item.value = value
 	} else {
-		item = &arcItem{
+		item = &cacheItem{
 			clock: c.clock,
 			key:   key,
 			value: value,
@@ -163,26 +141,6 @@ func (c *ARC) set(key, value interface{}) (interface{}, error) {
 	return item, nil
 }
 
-// Get a value from cache pool using key if it exists. If not exists and it has LoaderFunc, it will generate the value using you have specified LoaderFunc method returns value.
-func (c *ARC) Get(ctx context.Context, key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(ctx, key, true)
-	}
-	return v, err
-}
-
-// GetIFPresent gets a value from cache pool using key if it exists.
-// If it dose not exists key, returns KeyNotFoundError.
-// And send a request which refresh value for specified key if cache object has LoaderFunc.
-func (c *ARC) GetIFPresent(key interface{}) (interface{}, error) {
-	v, err := c.get(key, false)
-	if err == KeyNotFoundError {
-		return c.getWithLoader(context.Background(), key, false)
-	}
-	return v, err
-}
-
 func (c *ARC) get(key interface{}, onLoad bool) (interface{}, error) {
 	v, err := c.getValue(key, onLoad)
 	if err != nil {
@@ -236,32 +194,6 @@ func (c *ARC) getValue(key interface{}, onLoad bool) (interface{}, error) {
 		c.stats.IncrMissCount()
 	}
 	return nil, KeyNotFoundError
-}
-
-func (c *ARC) getWithLoader(ctx context.Context, key interface{}, isWait bool) (interface{}, error) {
-	if c.loaderExpireFunc == nil {
-		return nil, KeyNotFoundError
-	}
-	value, _, err := c.load(ctx, key, func(v interface{}, expiration *time.Duration, e error) (interface{}, error) {
-		if e != nil {
-			return nil, e
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		item, err := c.set(key, v)
-		if err != nil {
-			return nil, err
-		}
-		if expiration != nil {
-			t := c.clock.Now().Add(*expiration)
-			item.(*arcItem).expiration = &t
-		}
-		return v, nil
-	}, isWait)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 // Has checks if key exists in cache
@@ -383,28 +315,9 @@ func (c *ARC) isCacheFull() bool {
 	return (c.t1.Len() + c.t2.Len()) == c.size
 }
 
-// IsExpired returns boolean value whether this item is expired or not.
-func (it *arcItem) IsExpired(now *time.Time) bool {
-	if it.expiration == nil {
-		return false
-	}
-	if now == nil {
-		t := it.clock.Now()
-		now = &t
-	}
-	return it.expiration.Before(*now)
-}
-
 type arcList struct {
 	l    *list.List
 	keys map[interface{}]*list.Element
-}
-
-type arcItem struct {
-	clock      Clock
-	key        interface{}
-	value      interface{}
-	expiration *time.Time
 }
 
 func newARCList() *arcList {
